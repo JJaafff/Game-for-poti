@@ -6,7 +6,24 @@
     <title>Poti Game</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.js"></script>
   <style>
-    body { margin: 0; background: #222; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+    body { 
+      margin: 0; 
+      background: #222; 
+      display: flex; 
+      justify-content: center; 
+      align-items: center; 
+      height: 100vh; 
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none; /* Disable callout on iOS */
+      -webkit-user-select: none; /* Disable text selection */
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+    }
   </style>
 </head>
 <body>
@@ -24,9 +41,18 @@ class GameScene extends Phaser.Scene {
   }
 
   create() {
+    // Store game dimensions (use base game size, not scaled)
+    this.gameWidth = 1200;
+    this.gameHeight = 700;
+    this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    // Get actual display size for positioning
+    this.displayWidth = this.scale.displaySize.width;
+    this.displayHeight = this.scale.displaySize.height;
+
     // 1. BACKGROUND
-    const bg = this.add.image(600, 350, 'background');
-    bg.setDisplaySize(1200, 700);
+    const bg = this.add.image(this.gameWidth / 2, this.gameHeight / 2, 'background');
+    bg.setDisplaySize(this.gameWidth, this.gameHeight);
 
     // 2. GENERATE TEXTURES
     this.makeBetterPlayer(); 
@@ -36,17 +62,21 @@ class GameScene extends Phaser.Scene {
 
     // 3. PHYSICS & FLOOR
     this.platforms = this.physics.add.staticGroup();
-    const groundBody = this.add.rectangle(600, 595, 1200, 20, 0x000000, 0);
+    const groundY = this.gameHeight - 105; // Position ground near bottom
+    const groundBody = this.add.rectangle(this.gameWidth / 2, groundY, this.gameWidth, 20, 0x000000, 0);
+    this.physics.add.existing(groundBody, true);
     this.platforms.add(groundBody);
 
-    // 4. PLATFORMS
+    // 4. PLATFORMS - Scale positions based on screen size
+    const scaleX = this.gameWidth / 1200;
+    const scaleY = this.gameHeight / 700;
     const levelLayout = [
-      {x: 220, y: 440, w: 150, c: 'plat_red'},
-      {x: 450, y: 360, w: 150, c: 'plat_blue'},
-      {x: 680, y: 400, w: 130, c: 'plat_yellow'},
-      {x: 580, y: 230, w: 150, c: 'plat_green'},
-      {x: 880, y: 300, w: 150, c: 'plat_red'},
-      {x: 1080, y: 340, w: 130, c: 'plat_blue'}
+      {x: 220 * scaleX, y: 440 * scaleY, w: 150 * scaleX, c: 'plat_red'},
+      {x: 450 * scaleX, y: 360 * scaleY, w: 150 * scaleX, c: 'plat_blue'},
+      {x: 680 * scaleX, y: 400 * scaleY, w: 130 * scaleX, c: 'plat_yellow'},
+      {x: 580 * scaleX, y: 230 * scaleY, w: 150 * scaleX, c: 'plat_green'},
+      {x: 880 * scaleX, y: 300 * scaleY, w: 150 * scaleX, c: 'plat_red'},
+      {x: 1080 * scaleX, y: 340 * scaleY, w: 130 * scaleX, c: 'plat_blue'}
     ];
 
     levelLayout.forEach(p => {
@@ -55,13 +85,16 @@ class GameScene extends Phaser.Scene {
       plat.refreshBody();
     });
 
-    // 5. TRASH CAN 
-    this.trashCan = this.physics.add.staticSprite(1130, 560, 'trashcan');
-    this.trashCan.setDisplaySize(60, 80);
+    // 5. TRASH CAN - Position relative to screen
+    const trashCanX = this.gameWidth - 70 * scaleX;
+    const trashCanY = groundY - 40;
+    this.trashCan = this.physics.add.staticSprite(trashCanX, trashCanY, 'trashcan');
+    this.trashCan.setDisplaySize(60 * scaleX, 80 * scaleY);
     this.trashCan.setDepth(5);
     
-    // 6. PLAYER
-    this.player = this.physics.add.sprite(100, 500, 'player');
+    // 6. PLAYER - Position relative to screen
+    this.player = this.physics.add.sprite(100 * scaleX, (groundY - 95) * scaleY, 'player');
+    this.player.setDisplaySize(50 * scaleX, 90 * scaleY);
     this.player.setCollideWorldBounds(true);
     this.player.setDepth(10);
     this.player.setBounce(0.1);
@@ -86,9 +119,11 @@ class GameScene extends Phaser.Scene {
     this.jumpKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.collected = 0;
     this.deposited = 0;
-    this.scoreText = this.add.text(20, 20, 'ჩანთაში: 0 | შეგროვებული: 0', {
-      fontSize: '26px', fill: '#fff', stroke: '#000', strokeThickness: 5
-    });
+    // Score text - responsive font size
+    const fontSize = this.isMobile ? 18 : 26;
+    this.scoreText = this.add.text(20 * scaleX, 20 * scaleY, 'ჩანთაში: 0 | შეგროვებული: 0', {
+      fontSize: fontSize + 'px', fill: '#fff', stroke: '#000', strokeThickness: 5
+    }).setScrollFactor(0);
 
     // MOBILE TOUCH CONTROLS
     this.createTouchControls();
@@ -153,20 +188,32 @@ class GameScene extends Phaser.Scene {
     this.rightButtonPressed = false;
     this.jumpButtonPressed = false;
 
+    // Button sizes - larger on mobile for easier tapping
+    const btnRadius = this.isMobile ? 50 : 40;
+    const jumpBtnRadius = this.isMobile ? 60 : 50;
+    const btnFontSize = this.isMobile ? 40 : 32;
+    const jumpFontSize = this.isMobile ? 44 : 36;
+
+    // Button positions - bottom of screen (use base game coordinates)
+    const btnY = 600; // Fixed position in game coordinates
+    const leftBtnX = 80;
+    const rightBtnX = 160;
+    const jumpBtnX = 1100;
+
     // Button style
     const buttonStyle = {
-      fontSize: '32px',
+      fontSize: btnFontSize + 'px',
       fill: '#ffffff',
       stroke: '#000000',
       strokeThickness: 4
     };
 
     // Left button
-    const leftBtn = this.add.circle(80, 600, 40, 0x43a047, 0.8)
+    const leftBtn = this.add.circle(leftBtnX, btnY, btnRadius, 0x43a047, 0.8)
       .setInteractive({ useHandCursor: true })
       .setDepth(50)
       .setScrollFactor(0);
-    const leftText = this.add.text(80, 600, '←', buttonStyle)
+    const leftText = this.add.text(leftBtnX, btnY, '←', buttonStyle)
       .setOrigin(0.5)
       .setDepth(51)
       .setScrollFactor(0);
@@ -176,11 +223,11 @@ class GameScene extends Phaser.Scene {
     leftBtn.on('pointerout', () => { this.leftButtonPressed = false; });
 
     // Right button
-    const rightBtn = this.add.circle(160, 600, 40, 0x43a047, 0.8)
+    const rightBtn = this.add.circle(rightBtnX, btnY, btnRadius, 0x43a047, 0.8)
       .setInteractive({ useHandCursor: true })
       .setDepth(50)
       .setScrollFactor(0);
-    const rightText = this.add.text(160, 600, '→', buttonStyle)
+    const rightText = this.add.text(rightBtnX, btnY, '→', buttonStyle)
       .setOrigin(0.5)
       .setDepth(51)
       .setScrollFactor(0);
@@ -190,12 +237,12 @@ class GameScene extends Phaser.Scene {
     rightBtn.on('pointerout', () => { this.rightButtonPressed = false; });
 
     // Jump button (on the right side)
-    const jumpBtn = this.add.circle(1100, 600, 50, 0xff6b35, 0.8)
+    const jumpBtn = this.add.circle(jumpBtnX, btnY, jumpBtnRadius, 0xff6b35, 0.8)
       .setInteractive({ useHandCursor: true })
       .setDepth(50)
       .setScrollFactor(0);
-    const jumpText = this.add.text(1100, 600, '↑', {
-      fontSize: '36px',
+    const jumpText = this.add.text(jumpBtnX, btnY, '↑', {
+      fontSize: jumpFontSize + 'px',
       fill: '#ffffff',
       stroke: '#000000',
       strokeThickness: 4
@@ -222,29 +269,45 @@ class GameScene extends Phaser.Scene {
 
   // --- POPUP UI FUNCTION ---
   showPopup(titleText, descText, btnLabel, callback) {
-    // Dark Overlay - positioned at screen center, not container relative
-    const overlay = this.add.rectangle(600, 350, 1200, 700, 0x000000, 0.7).setDepth(99);
+    const centerX = this.gameWidth / 2;
+    const centerY = this.gameHeight / 2;
+    const isMobile = this.isMobile;
+    
+    // Dark Overlay - positioned at screen center
+    const overlay = this.add.rectangle(centerX, centerY, this.gameWidth, this.gameHeight, 0x000000, 0.7).setDepth(99);
     
     // Container for popup elements
-    const container = this.add.container(600, 350).setDepth(100);
+    const container = this.add.container(centerX, centerY).setDepth(100);
+
+    // Responsive popup sizes
+    const boxWidth = isMobile ? this.gameWidth * 0.85 : 450;
+    const boxHeight = isMobile ? this.gameHeight * 0.5 : 300;
+    const titleFontSize = isMobile ? 32 : 42;
+    const descFontSize = isMobile ? 18 : 22;
+    const btnFontSize = isMobile ? 20 : 24;
+    const btnWidth = isMobile ? boxWidth * 0.7 : 220;
+    const btnHeight = isMobile ? 50 : 60;
 
     // Background Box
-    const box = this.add.rectangle(0, 0, 450, 300, 0xffffff, 1);
+    const box = this.add.rectangle(0, 0, boxWidth, boxHeight, 0xffffff, 1);
     box.setStrokeStyle(6, 0x43a047);
 
     // Title
-    const title = this.add.text(0, -100, titleText, {
-      fontSize: '42px', fill: '#1b5e20', fontWeight: 'bold'
+    const title = this.add.text(0, isMobile ? -boxHeight * 0.3 : -100, titleText, {
+      fontSize: titleFontSize + 'px', fill: '#1b5e20', fontWeight: 'bold'
     }).setOrigin(0.5);
 
     // Description
-    const desc = this.add.text(0, -20, descText, {
-      fontSize: '22px', fill: '#333', align: 'center'
+    const desc = this.add.text(0, isMobile ? -20 : -20, descText, {
+      fontSize: descFontSize + 'px', fill: '#333', align: 'center',
+      wordWrap: { width: boxWidth - 40 }
     }).setOrigin(0.5);
 
     // Button
-    const btnBg = this.add.rectangle(0, 80, 220, 60, 0x43a047).setInteractive({ useHandCursor: true });
-    const btnText = this.add.text(0, 80, btnLabel, { fontSize: '24px', fill: '#fff' }).setOrigin(0.5);
+    const btnBg = this.add.rectangle(0, isMobile ? boxHeight * 0.25 : 80, btnWidth, btnHeight, 0x43a047).setInteractive({ useHandCursor: true });
+    const btnText = this.add.text(0, isMobile ? boxHeight * 0.25 : 80, btnLabel, { 
+      fontSize: btnFontSize + 'px', fill: '#fff' 
+    }).setOrigin(0.5);
 
     btnBg.on('pointerdown', () => {
         container.destroy();
@@ -405,9 +468,17 @@ class GameScene extends Phaser.Scene {
 
 const config = {
   type: Phaser.AUTO,
-  width: 1200, height: 700,
+  width: 1200,
+  height: 700,
   physics: { default: 'arcade', arcade: { gravity: { y: 1300 }, debug: false } },
-  scene: GameScene
+  scene: GameScene,
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    parent: 'phaser-game',
+    width: 1200,
+    height: 700
+  }
 };
 new Phaser.Game(config);
 </script>
