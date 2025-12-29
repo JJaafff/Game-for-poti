@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Poti Game</title>
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.js"></script>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Poti Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.js"></script>
   <style>
     body { margin: 0; background: #222; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
   </style>
@@ -89,6 +90,9 @@ class GameScene extends Phaser.Scene {
       fontSize: '26px', fill: '#fff', stroke: '#000', strokeThickness: 5
     });
 
+    // MOBILE TOUCH CONTROLS
+    this.createTouchControls();
+
     // INITIAL POPUP
     this.showPopup("LEVEL 1", "დონე : მარტივი\nშეაგროვე 6 ბოთლი და\n მოათავსე ნაგვის ურნაში.", "თამაშის დაწყება", () => {
       this.gameActive = true;
@@ -101,11 +105,20 @@ class GameScene extends Phaser.Scene {
         return;
     }
 
-    if (this.cursors.left.isDown) { this.player.setVelocityX(-300); } 
-    else if (this.cursors.right.isDown) { this.player.setVelocityX(300); } 
-    else { this.player.setVelocityX(0); }
+    // Check both keyboard and touch controls
+    const leftPressed = this.cursors.left.isDown || this.leftButtonPressed;
+    const rightPressed = this.cursors.right.isDown || this.rightButtonPressed;
+    const jumpPressed = this.cursors.up.isDown || this.jumpKey.isDown || this.jumpButtonPressed;
 
-    if ((this.cursors.up.isDown || this.jumpKey.isDown) && this.player.body.touching.down) {
+    if (leftPressed) { 
+      this.player.setVelocityX(-300); 
+    } else if (rightPressed) { 
+      this.player.setVelocityX(300); 
+    } else { 
+      this.player.setVelocityX(0); 
+    }
+
+    if (jumpPressed && this.player.body.touching.down) {
       this.player.setVelocityY(-720);
     }
 
@@ -132,6 +145,79 @@ class GameScene extends Phaser.Scene {
 
   updateScore() {
     this.scoreText.setText(`ჩანთაში: ${this.collected} | შეგროვებული: ${this.deposited}`);
+  }
+
+  createTouchControls() {
+    // Initialize button states
+    this.leftButtonPressed = false;
+    this.rightButtonPressed = false;
+    this.jumpButtonPressed = false;
+
+    // Button style
+    const buttonStyle = {
+      fontSize: '32px',
+      fill: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 4
+    };
+
+    // Left button
+    const leftBtn = this.add.circle(80, 600, 40, 0x43a047, 0.8)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(50)
+      .setScrollFactor(0);
+    const leftText = this.add.text(80, 600, '←', buttonStyle)
+      .setOrigin(0.5)
+      .setDepth(51)
+      .setScrollFactor(0);
+
+    leftBtn.on('pointerdown', () => { this.leftButtonPressed = true; });
+    leftBtn.on('pointerup', () => { this.leftButtonPressed = false; });
+    leftBtn.on('pointerout', () => { this.leftButtonPressed = false; });
+
+    // Right button
+    const rightBtn = this.add.circle(160, 600, 40, 0x43a047, 0.8)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(50)
+      .setScrollFactor(0);
+    const rightText = this.add.text(160, 600, '→', buttonStyle)
+      .setOrigin(0.5)
+      .setDepth(51)
+      .setScrollFactor(0);
+
+    rightBtn.on('pointerdown', () => { this.rightButtonPressed = true; });
+    rightBtn.on('pointerup', () => { this.rightButtonPressed = false; });
+    rightBtn.on('pointerout', () => { this.rightButtonPressed = false; });
+
+    // Jump button (on the right side)
+    const jumpBtn = this.add.circle(1100, 600, 50, 0xff6b35, 0.8)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(50)
+      .setScrollFactor(0);
+    const jumpText = this.add.text(1100, 600, '↑', {
+      fontSize: '36px',
+      fill: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 4
+    })
+      .setOrigin(0.5)
+      .setDepth(51)
+      .setScrollFactor(0);
+
+    jumpBtn.on('pointerdown', () => { 
+      this.jumpButtonPressed = true;
+      // Also trigger jump immediately if on ground
+      if (this.gameActive && this.player.body.touching.down) {
+        this.player.setVelocityY(-720);
+      }
+    });
+    jumpBtn.on('pointerup', () => { this.jumpButtonPressed = false; });
+    jumpBtn.on('pointerout', () => { this.jumpButtonPressed = false; });
+
+    // Store references
+    this.touchControls = {
+      leftBtn, leftText, rightBtn, rightText, jumpBtn, jumpText
+    };
   }
 
   // --- POPUP UI FUNCTION ---
