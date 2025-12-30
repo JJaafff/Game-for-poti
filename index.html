@@ -8,11 +8,13 @@
   <style>
     body { 
       margin: 0; 
+      padding: 0;
       background: #222; 
       display: flex; 
       justify-content: center; 
       align-items: center; 
       height: 100vh; 
+      width: 100vw;
       overflow: hidden;
       touch-action: none; /* Prevent default touch behaviors */
       -webkit-touch-callout: none; /* Disable callout on iOS */
@@ -21,8 +23,25 @@
     }
     canvas {
       display: block;
-      max-width: 100%;
-      max-height: 100%;
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: contain;
+    }
+    
+    /* For iPhone - scale down slightly */
+    @media screen and (max-width: 430px) and (-webkit-min-device-pixel-ratio: 2) {
+      canvas {
+        transform: scale(0.85);
+        transform-origin: center;
+      }
+    }
+    
+    /* For Android - scale up slightly */
+    @media screen and (max-width: 500px) and (max-resolution: 300dpi) {
+      canvas {
+        transform: scale(1.15);
+        transform-origin: center;
+      }
     }
   </style>
 </head>
@@ -45,6 +64,17 @@ class GameScene extends Phaser.Scene {
     this.gameWidth = 1200;
     this.gameHeight = 700;
     this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    this.isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    this.isAndroid = /Android/i.test(navigator.userAgent);
+    
+    // Adjust scale for different devices
+    if (this.isIOS) {
+      // iPhone - scale down slightly (they have high DPI screens)
+      this.scale.setZoom(0.85);
+    } else if (this.isAndroid) {
+      // Android - scale up slightly (often lower DPI)
+      this.scale.setZoom(1.15);
+    }
     
     // Get actual display size for positioning
     this.displayWidth = this.scale.displaySize.width;
@@ -92,12 +122,16 @@ class GameScene extends Phaser.Scene {
     this.trashCan.setDisplaySize(60 * scaleX, 80 * scaleY);
     this.trashCan.setDepth(5);
     
-    // 6. PLAYER - Position relative to screen
-    this.player = this.physics.add.sprite(100 * scaleX, (groundY - 95) * scaleY, 'player');
+    // 6. PLAYER - Position relative to screen (start with idle texture)
+    this.player = this.physics.add.sprite(100 * scaleX, (groundY - 95) * scaleY, 'player_idle');
     this.player.setDisplaySize(50 * scaleX, 90 * scaleY);
     this.player.setCollideWorldBounds(true);
     this.player.setDepth(10);
     this.player.setBounce(0.1);
+
+    // Walking animation state
+    this.walkFrame = 0;      // 0 = idle, 1 & 2 = walking frames
+    this.walkAnimTime = 0;   // time accumulator for walk animation
 
     // 7. BOTTLES
     this.bottles = this.physics.add.group();
@@ -134,7 +168,7 @@ class GameScene extends Phaser.Scene {
     });
   }
 
-  update() {
+  update(time, delta) {
     if (!this.gameActive) {
         this.player.setVelocityX(0);
         return;
@@ -145,6 +179,7 @@ class GameScene extends Phaser.Scene {
     const rightPressed = this.cursors.right.isDown || this.rightButtonPressed;
     const jumpPressed = this.cursors.up.isDown || this.jumpKey.isDown || this.jumpButtonPressed;
 
+    // Handle movement
     if (leftPressed) { 
       this.player.setVelocityX(-300); 
     } else if (rightPressed) { 
@@ -153,7 +188,9 @@ class GameScene extends Phaser.Scene {
       this.player.setVelocityX(0); 
     }
 
-    if (jumpPressed && this.player.body.touching.down) {
+    // Handle jump - only when on ground or very close to it
+    const canJump = this.player.body.touching.down || this.player.body.blocked.down;
+    if (jumpPressed && canJump) {
       this.player.setVelocityY(-720);
     }
 
@@ -176,6 +213,29 @@ class GameScene extends Phaser.Scene {
           });
       }
     }
+
+    // --- WALK ANIMATION ---
+    const movingHorizontally = Math.abs(this.player.body.velocity.x) > 5;
+    const onGround = this.player.body.touching.down || this.player.body.blocked.down;
+
+    if (movingHorizontally && onGround) {
+      // Accumulate time for animation
+      this.walkAnimTime += delta;
+      if (this.walkAnimTime > 120) { // switch frame every ~120ms
+        // Toggle between walking frames 1 and 2
+        this.walkFrame = this.walkFrame === 1 ? 2 : 1;
+        const texKey = this.walkFrame === 1 ? 'player_walk1' : 'player_walk2';
+        this.player.setTexture(texKey);
+        this.walkAnimTime = 0;
+      }
+    } else {
+      // Not moving or in air → idle pose
+      if (this.walkFrame !== 0) {
+        this.player.setTexture('player_idle');
+        this.walkFrame = 0;
+      }
+      this.walkAnimTime = 0;
+    }
   }
 
   updateScore() {
@@ -187,6 +247,7 @@ class GameScene extends Phaser.Scene {
     this.leftButtonPressed = false;
     this.rightButtonPressed = false;
     this.jumpButtonPressed = false;
+    this.jumpButtonJustPressed = false;
 
     // Button sizes - larger on mobile for easier tapping
     const btnRadius = this.isMobile ? 50 : 40;
@@ -253,13 +314,20 @@ class GameScene extends Phaser.Scene {
 
     jumpBtn.on('pointerdown', () => { 
       this.jumpButtonPressed = true;
+      this.jumpButtonJustPressed = true;
       // Also trigger jump immediately if on ground
       if (this.gameActive && this.player.body.touching.down) {
         this.player.setVelocityY(-720);
       }
     });
-    jumpBtn.on('pointerup', () => { this.jumpButtonPressed = false; });
-    jumpBtn.on('pointerout', () => { this.jumpButtonPressed = false; });
+    jumpBtn.on('pointerup', () => { 
+      this.jumpButtonPressed = false;
+      this.jumpButtonJustPressed = false;
+    });
+    jumpBtn.on('pointerout', () => { 
+      this.jumpButtonPressed = false;
+      this.jumpButtonJustPressed = false;
+    });
 
     // Store references
     this.touchControls = {
@@ -322,24 +390,33 @@ class GameScene extends Phaser.Scene {
     this.popupContainer = container;
   }
 
-  // --- CHARACTER DESIGN ---
+  // --- CHARACTER DESIGN & WALK ANIMATION FRAMES ---
   makeBetterPlayer() {
+    // Create three poses: idle, walk1, walk2
+    this.createPlayerPose('player_idle', 0, 0, 0, 0);
+    // Left leg forward, right leg back, arms swing
+    this.createPlayerPose('player_walk1', -6, 4, -4, 4);
+    // Right leg forward, left leg back, arms swing opposite
+    this.createPlayerPose('player_walk2', 4, -6, 4, -4);
+  }
+
+  createPlayerPose(key, leftLegDY, rightLegDY, leftArmDY, rightArmDY) {
     const g = this.make.graphics({ add: false });
     
     // Legs
     g.fillStyle(0x0d47a1, 1);
-    g.fillRect(15, 65, 8, 18);
+    g.fillRect(15, 65 + leftLegDY, 8, 18);
     g.fillStyle(0x1565c0, 1); 
-    g.fillRect(15, 65, 3, 18);
+    g.fillRect(15, 65 + leftLegDY, 3, 18);
     
     g.fillStyle(0x0d47a1, 1);
-    g.fillRect(27, 65, 8, 18);
+    g.fillRect(27, 65 + rightLegDY, 8, 18);
     g.fillStyle(0x1565c0, 1);
-    g.fillRect(27, 65, 3, 18);
+    g.fillRect(27, 65 + rightLegDY, 3, 18);
     
     g.fillStyle(0x424242, 1);
-    g.fillEllipse(19, 83, 10, 4); 
-    g.fillEllipse(31, 83, 10, 4); 
+    g.fillEllipse(19, 83 + leftLegDY, 10, 4); 
+    g.fillEllipse(31, 83 + rightLegDY, 10, 4); 
 
     // Body
     g.fillStyle(0x1976d2, 1);
@@ -349,12 +426,12 @@ class GameScene extends Phaser.Scene {
     
     // Arms
     g.fillStyle(0x1976d2, 1);
-    g.fillRoundedRect(5, 35, 6, 22, 3);
-    g.fillRoundedRect(39, 35, 6, 22, 3);
+    g.fillRoundedRect(5, 35 + leftArmDY, 6, 22, 3);
+    g.fillRoundedRect(39, 35 + rightArmDY, 6, 22, 3);
     
     g.fillStyle(0xffccbc, 1);
-    g.fillCircle(8, 57, 4); 
-    g.fillCircle(42, 57, 4); 
+    g.fillCircle(8, 57 + leftArmDY, 4); 
+    g.fillCircle(42, 57 + rightArmDY, 4); 
 
     // Head
     g.fillStyle(0xffccbc, 1);
@@ -377,7 +454,7 @@ class GameScene extends Phaser.Scene {
     g.arc(25, 21, 7, 0, Math.PI);
     g.strokePath();
 
-    g.generateTexture('player', 50, 90);
+    g.generateTexture(key, 50, 90);
     g.destroy();
   }
 
@@ -466,20 +543,25 @@ class GameScene extends Phaser.Scene {
   }
 }
 
+// Base game dimensions
+const baseWidth = 1200;
+const baseHeight = 700;
+
 const config = {
   type: Phaser.AUTO,
-  width: 1200,
-  height: 700,
+  width: baseWidth,
+  height: baseHeight,
   physics: { default: 'arcade', arcade: { gravity: { y: 1300 }, debug: false } },
   scene: GameScene,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
-    parent: 'phaser-game',
-    width: 1200,
-    height: 700
+    width: baseWidth,
+    height: baseHeight,
+    parent: 'phaser-game'
   }
 };
+
 new Phaser.Game(config);
 </script>
 
