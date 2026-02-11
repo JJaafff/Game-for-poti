@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Poti Game - Story Mode</title>
+  <title>Poti Game - 5 Levels Adventure</title>
   <style>
     body { margin: 0; padding: 0; background-color: #000; overflow: hidden; touch-action: none; font-family: 'Arial', sans-serif; }
     
@@ -34,14 +35,25 @@
     #popup-overlay {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85);
       display: flex; justify-content: center; align-items: center; z-index: 100;
-      /* Visibility handled by JS now */
     }
     #popup-box {
-      background: white; padding: 25px; border-radius: 12px; text-align: center; width: 300px;
+      background: white; padding: 25px; border-radius: 12px; text-align: center; width: 320px;
       border-top: 6px solid #43a047;
       box-shadow: 0 0 20px rgba(0,0,0,0.5);
+      max-height: 90vh; /* Prevent it from being too tall on small screens */
+      overflow-y: auto;
     }
-    #popup-title { margin-top: 0; color: #333; }
+    #popup-title { margin-top: 10px; color: #333; }
+    
+    /* NEW: Style for the sponsor image */
+    #popup-img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 5px;
+        margin-bottom: 10px;
+        display: none; /* Hidden by default, shown via JS */
+    }
+
     .popup-btn {
       background: #43a047; color: white; border: none; padding: 12px 24px; font-size: 18px; font-weight: bold;
       border-radius: 6px; margin-top: 15px; cursor: pointer;
@@ -71,6 +83,8 @@
 
   <div id="popup-overlay">
     <div id="popup-box">
+      <img id="popup-img" src="start_photo.jpg" alt="Sponsors">
+      
       <h2 id="popup-title">Loading...</h2>
       <p id="popup-msg">Please wait.</p>
       <button id="popup-btn" class="popup-btn">Start</button>
@@ -94,27 +108,41 @@ class GameScene extends Phaser.Scene {
     this.deposited = 0;
     this.walkTimer = 0;
     this.isGameOver = false;
+    
+    // Boss Variables
+    this.boss = null;
+    this.bossHealth = 5;
+    this.bossInvulnerable = false;
+    this.bossSpeed = 200;
+    
+    // Level 4 Variable
+    this.lightSource = null;
   }
 
   preload() {
-    this.load.image('custom_bg', 'background.png'); 
-    this.load.image('toxic_bg', 'background2.png'); 
+    this.load.image('bg_forest', 'background.png');    
+    this.load.image('bg_toxic', 'background2.png');    
+    this.load.image('bg_boss', 'background3.png');     
 
     this.createPlayerPoses(); 
     this.createPlatformTextures();
     this.createItemTextures();
     this.createWaterTexture(); 
+    this.createBossTexture(); 
+    this.createRainTexture(); 
+    this.createLightTexture(); // For Level 4 Flashlight
   }
 
   create() {
-    // 1. Setup the Level
-    if (this.levelNumber === 1) {
-        this.createLevel1();
-    } else {
-        this.createLevel2();
-    }
+    // --- LEVEL SELECTOR ---
+    if (this.levelNumber === 1) this.createLevel1();
+    else if (this.levelNumber === 2) this.createLevel2(); 
+    else if (this.levelNumber === 3) this.createLevel3(); 
+    else if (this.levelNumber === 4) this.createLevel4(); 
+    else this.createLevel5(); 
 
-    const startX = this.levelNumber === 1 ? 100 : 250;
+    // Player Setup
+    const startX = (this.levelNumber === 5) ? 200 : 250;
     const startY = this.groundY - 200;
     
     this.player = this.physics.add.sprite(startX, startY, 'player_idle');
@@ -125,220 +153,395 @@ class GameScene extends Phaser.Scene {
 
     this.cameras.main.setBounds(0, 0, this.worldW, this.worldH);
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
-    this.cameras.main.setZoom(0.45);
+    this.cameras.main.setZoom(this.levelNumber === 5 ? 0.6 : 0.45); 
 
     this.physics.add.collider(this.player, this.platforms);
-    this.physics.add.overlap(this.player, this.bottles, this.collectBottle, null, this);
     
+    // Boss Collision Logic
+    if (this.levelNumber === 5) {
+        this.physics.add.collider(this.boss, this.platforms);
+        this.physics.add.collider(this.player, this.boss, this.hitBoss, null, this);
+        this.physics.add.overlap(this.player, this.bottles, this.collectBottle, null, this);
+    } else {
+        this.physics.add.overlap(this.player, this.bottles, this.collectBottle, null, this);
+    }
+
+    // Water Logic (Level 3)
     if (this.toxicWater) {
-        this.physics.add.overlap(this.player, this.toxicWater, this.hitWater, null, this);
+        this.physics.add.overlap(this.player, this.toxicWater, this.hitDanger, null, this);
+    }
+
+    // Rain Logic (Level 2)
+    if (this.levelNumber === 2) {
+        this.raindrops = this.physics.add.group();
+        this.physics.add.overlap(this.player, this.raindrops, this.hitDanger, null, this);
+    }
+
+    // Setup Level 4 Flashlight Effect
+    if (this.levelNumber === 4) {
+        // Create a dark layer covering the world
+        const darkness = this.add.rectangle(this.worldW/2, this.worldH/2, this.worldW, this.worldH, 0x000000, 0.96);
+        darkness.setDepth(100); // Sit on top of everything
+        
+        // Create the "Light" that follows the player
+        this.lightSource = this.make.image({ x: this.player.x, y: this.player.y, key: 'light_texture', add: false });
+        
+        // Use the light source as a mask for the darkness
+        const mask = new Phaser.Display.Masks.BitmapMask(this, this.lightSource);
+        mask.invertAlpha = true;
+        darkness.setMask(mask);
     }
 
     this.cursors = this.input.keyboard.createCursorKeys();
     this.setupTouchControls();
     this.updateUI();
 
-    // 2. SHOW THE INTRO POPUP (Pause Physics immediately)
     this.showIntroPopup();
   }
 
   // --- POPUP SYSTEM ---
   showIntroPopup() {
-    this.physics.pause(); // Stop gravity/water
+    this.physics.pause(); 
     const overlay = document.getElementById('popup-overlay');
     const title = document.getElementById('popup-title');
     const msg = document.getElementById('popup-msg');
     const btn = document.getElementById('popup-btn');
+    const img = document.getElementById('popup-img'); // Get the image element
 
     overlay.style.visibility = 'visible';
     overlay.style.opacity = '1';
     title.style.color = "#333";
 
+    // Logic to show image ONLY on Level 1 (Start of game)
     if (this.levelNumber === 1) {
-        title.innerText = "დონე 1: ტყის გასუფთავება!";
-        msg.innerText = "ტყე დაბინძურებულია შუშის ბოთლებით. შეაგროვე 7 ბოთლი და გადააგდე ნაგვის ურნაში, რათა სისუფთავე აღადგინო.";
+        img.style.display = 'block';
     } else {
-        title.innerText = "დონე 2: ტოქსიკური წყალდიდობა!";
-        title.style.color = "#d32f2f";
-        msg.innerText = "არა! ტოქსიკური წყალდიდობა ახლოვდება! შეაგროვე 8 ბოთლი და გადააგდე ნაგვის ურნაში, სანამ წყალი შენთან მოაღწევს. ურნა დინებამ სადღაც გადაისროლა";
+        img.style.display = 'none';
     }
+
+    if (this.levelNumber === 1) {
+        title.innerText = "დონე 1: ტყე";
+        msg.innerText = "შეაგროვე 7 ბოთლი და ჩააგდე ურნაში.";
+    } else if (this.levelNumber === 2) {
+        title.innerText = "დონე 2: ტოქსიკური წვიმა!";
+        title.style.color = "#d32f2f";
+        msg.innerText = "მოერიდე მჟავა წვიმას! შეაგროვე 8 ბოთლი.";
+    } else if (this.levelNumber === 3) {
+        title.innerText = "დონე 3: წყალდიდობა!";
+        title.style.color = "#d32f2f";
+        msg.innerText = "წყალი იმატებს! იჩქარე, შეაგროვე 8 ბოთლი.";
+    } else if (this.levelNumber === 4) {
+        title.innerText = "დონე 4: ღამე";
+        title.style.color = "#1565c0";
+        msg.innerText = "სიბნელეა... ფრთხილად იარე, მხოლოდ ფანარი გინათებს გზას!";
+    } else {
+        title.innerText = "დონე 5: მონსტრი!";
+        title.style.color = "#4a148c";
+        msg.innerText = "დაამარცხე ნაგვის მონსტრი! დაახტი თავზე 5-ჯერ.";
+    }
+
     btn.onclick = () => {
         overlay.style.opacity = '0';
         setTimeout(() => overlay.style.visibility = 'hidden', 300);
         this.physics.resume();
     };
   }
+
   showEndPopup(isWin) {
     const overlay = document.getElementById('popup-overlay');
     const title = document.getElementById('popup-title');
     const msg = document.getElementById('popup-msg');
     const btn = document.getElementById('popup-btn');
+    const img = document.getElementById('popup-img');
+
+    // Hide the image for end/win screens
+    img.style.display = 'none';
 
     overlay.style.visibility = 'visible';
     overlay.style.opacity = '1';
 
     if (!isWin) {
-        title.innerText = "თამაშის დასრულება!";
+        title.innerText = "წააგე!";
         title.style.color = "red";
-        msg.innerText = "ტოქსიკურ დინებას ვერ გაუძელი! სცადე თავიდან და გადაარჩინე ბუნება.";
+        msg.innerText = "სცადე თავიდან.";
         btn.innerText = "თავიდან ცდა";
-        btn.onclick = () => { NEXT_LEVEL_ID = 2; this.scene.restart({ level: 2 }); };
+        btn.onclick = () => { this.scene.restart({ level: this.levelNumber }); };
     } else {
-        // Win
-        if (this.levelNumber === 1) {
-            title.innerText = "ტყის გასუფთავება!";
+        if (this.levelNumber < 5) {
+            title.innerText = `დონე ${this.levelNumber} გავლილია!`;
             title.style.color = "#43a047";
-            msg.innerText = "ყოჩაღ! მაგრამ მოიცა, რაღაც ცუდი ახლოვდება...";
-            btn.innerText = "დონე 2-ის დაწყება";
-            btn.onclick = () => { NEXT_LEVEL_ID = 2; this.scene.restart({ level: 2 }); };
+            msg.innerText = "ყოჩაღ! შემდეგი ეტაპი რთულია...";
+            btn.innerText = `დონე ${this.levelNumber + 1}`;
+            btn.onclick = () => { 
+                NEXT_LEVEL_ID = this.levelNumber + 1; 
+                this.scene.restart({ level: NEXT_LEVEL_ID }); 
+            };
         } else {
-            title.innerText = "თქვენ გადარჩინეთ ბუნება!";
-            title.style.color = "#43a047";
-            msg.innerText = "თქვენ გადაურჩით წყალდიდობას და გადაარჩინეთ ბუნება! მადლობა თამაშისთვის.";
+            title.innerText = "თამაში დამთავრდა!";
+            title.style.color = "#FFD700"; 
+            msg.innerHTML = "შენ გადაარჩინე სამყარო!<br>გილოცავ!";
             btn.innerText = "თავიდან დაწყება";
             btn.onclick = () => { NEXT_LEVEL_ID = 1; this.scene.restart({ level: 1 }); };
         }
     }
   }
+
+  // --- LEVEL 1 (Classic Forest) ---
   createLevel1() {
     this.totalBottles = 7;
-    this.worldW = 1600;
-    this.worldH = 2200;
-    this.groundY = this.worldH - 100;
-
+    this.worldW = 1600; this.worldH = 2200; this.groundY = this.worldH - 100;
     this.physics.world.setBounds(0, 0, this.worldW, this.worldH);
-    const bg = this.add.image(0, 0, 'custom_bg').setOrigin(0, 0);
-    bg.setDisplaySize(this.worldW, this.worldH);
-
+    this.add.image(0, 0, 'bg_forest').setOrigin(0, 0).setDisplaySize(this.worldW, this.worldH);
+    
     this.platforms = this.physics.add.staticGroup();
     const ground = this.add.rectangle(this.worldW/2, this.groundY, this.worldW, 60, 0x000000); 
-    ground.setAlpha(0); 
-    this.physics.add.existing(ground, true);
-    this.platforms.add(ground);
+    ground.setAlpha(0);
+    this.physics.add.existing(ground, true); this.platforms.add(ground);
 
-    const levels = [
-      {x: 300, y: this.groundY - 150, t: 'plat_red'},
-      {x: 600, y: this.groundY - 250, t: 'plat_blue'},
-      {x: 900, y: this.groundY - 350, t: 'plat_yellow'},
-      {x: 500, y: this.groundY - 450, t: 'plat_green'},
-      {x: 1200, y: this.groundY - 300, t: 'plat_blue'},
-      {x: 1450, y: this.groundY - 500, t: 'plat_yellow'},
+    const positions = [
+      {x: 300, y: this.groundY - 150, t: 'plat_red'}, {x: 600, y: this.groundY - 250, t: 'plat_blue'},
+      {x: 900, y: this.groundY - 350, t: 'plat_yellow'}, {x: 500, y: this.groundY - 450, t: 'plat_green'},
+      {x: 1200, y: this.groundY - 300, t: 'plat_blue'}, {x: 1450, y: this.groundY - 500, t: 'plat_yellow'},
       {x: 200, y: this.groundY - 450, t: 'plat_red'}
     ];
-
-    levels.forEach(p => {
-      this.platforms.create(p.x, p.y, p.t).refreshBody();
-    });
-
+    positions.forEach(p => this.platforms.create(p.x, p.y, p.t).refreshBody());
+    
     this.trashCan = this.physics.add.staticSprite(this.worldW - 150, this.groundY - 80, 'trashcan');
     this.trashCan.setDepth(5);
-    
     this.bottles = this.physics.add.group();
-    levels.forEach(p => this.spawnBottle(p.x, p.y - 70));
+    positions.forEach(p => this.spawnBottle(p.x, p.y - 70));
   }
 
+  // --- LEVEL 2 (Toxic Rain) ---
   createLevel2() {
     this.totalBottles = 8;
-    this.worldW = 1600;
-    this.worldH = 3000;
-    this.groundY = this.worldH - 100;
-
+    this.worldW = 1600; this.worldH = 2200; this.groundY = this.worldH - 100;
     this.physics.world.setBounds(0, 0, this.worldW, this.worldH);
+    this.add.image(0, 0, 'bg_toxic').setOrigin(0, 0).setDisplaySize(this.worldW, this.worldH);
     
-    // Uses the NEW Sad background
-    const bg = this.add.image(0, 0, 'toxic_bg').setOrigin(0, 0);
-    bg.setDisplaySize(this.worldW, this.worldH);
-
     this.platforms = this.physics.add.staticGroup();
     const ground = this.add.rectangle(this.worldW/2, this.groundY, this.worldW, 60, 0x000000); 
-    ground.setAlpha(0); 
-    this.physics.add.existing(ground, true);
-    this.platforms.add(ground);
+    ground.setAlpha(0);
+    this.physics.add.existing(ground, true); this.platforms.add(ground);
 
-    const levels = [
-        {x: 250, y: this.groundY - 200, t: 'plat_red'},    
-        {x: 650, y: this.groundY - 400, t: 'plat_blue'},   
-        {x: 1100, y: this.groundY - 600, t: 'plat_yellow'}, 
-        {x: 700, y: this.groundY - 850, t: 'plat_green'},   
-        {x: 250, y: this.groundY - 1100, t: 'plat_red'},    
-        
-        {x: 650, y: this.groundY - 1350, t: 'plat_blue'}, 
-        
-        {x: 1200, y: this.groundY - 1600, t: 'plat_yellow'}, 
-        
-        {x: 725, y: this.groundY - 1890, t: 'plat_green'}    
+    const positions = [
+      {x: 200, y: this.groundY - 150, t: 'plat_red'}, {x: 500, y: this.groundY - 300, t: 'plat_blue'},
+      {x: 900, y: this.groundY - 300, t: 'plat_yellow'}, {x: 1300, y: this.groundY - 400, t: 'plat_green'},
+      {x: 1500, y: this.groundY - 600, t: 'plat_red'}, {x: 1000, y: this.groundY - 600, t: 'plat_blue'},
+      {x: 600, y: this.groundY - 750, t: 'plat_yellow'}, {x: 200, y: this.groundY - 900, t: 'plat_green'}
     ];
+    positions.forEach(p => this.platforms.create(p.x, p.y, p.t).refreshBody());
 
+    this.trashCan = this.physics.add.staticSprite(this.worldW - 150, this.groundY - 80, 'trashcan');
     this.bottles = this.physics.add.group();
-    levels.forEach(p => {
-      this.platforms.create(p.x, p.y, p.t).refreshBody();
-      this.spawnBottle(p.x, p.y - 70);
+    positions.forEach(p => this.spawnBottle(p.x, p.y - 70));
+  }
+
+  // --- LEVEL 3 (Rising Water) ---
+  createLevel3() {
+    this.totalBottles = 8;
+    this.worldW = 1600; this.worldH = 3000; this.groundY = this.worldH - 100;
+    this.physics.world.setBounds(0, 0, this.worldW, this.worldH);
+    this.add.image(0, 0, 'bg_toxic').setOrigin(0, 0).setDisplaySize(this.worldW, this.worldH);
+    
+    this.createToxicPlatforms();
+    this.bottles = this.physics.add.group();
+    this.platformPositions.forEach(p => {
+        this.platforms.create(p.x, p.y, p.t).refreshBody();
+        this.spawnBottle(p.x, p.y - 70);
     });
-
     this.trashCan = this.physics.add.staticSprite(720, this.groundY - 2050, 'trashcan');
-    this.trashCan.setDepth(5);
-
-    // WATER
+    
     this.toxicWater = this.add.tileSprite(this.worldW/2, this.worldH + 600, this.worldW, 1000, 'water');
-    this.toxicWater.setDepth(20);
-    this.toxicWater.setAlpha(0.8);
+    this.toxicWater.setDepth(20); this.toxicWater.setAlpha(0.8);
     this.physics.add.existing(this.toxicWater);
     this.toxicWater.body.setAllowGravity(false);
     this.toxicWater.body.setVelocityY(-25); 
   }
 
-  spawnBottle(x, y) {
-      if(!this.bottles) return; 
-      const bottle = this.bottles.create(x, y, 'bottle');
-      bottle.body.allowGravity = false; 
-      bottle.setImmovable(true);
-      bottle.baseY = y; 
-      bottle.floatSpeed = 1 + Math.random() * 0.5;
-      bottle.floatOffset = Math.random() * Math.PI * 2;
+  // --- LEVEL 4 (Night Climb with Flashlight) ---
+  createLevel4() {
+    this.totalBottles = 10;
+    this.worldW = 1600; this.worldH = 2500; this.groundY = this.worldH - 100;
+    this.physics.world.setBounds(0, 0, this.worldW, this.worldH);
+    
+    // Background is dark blue (visible only under flashlight)
+    const bg = this.add.image(0, 0, 'bg_forest').setOrigin(0, 0).setDisplaySize(this.worldW, this.worldH);
+    bg.setTint(0x5555aa); 
+    
+    this.platforms = this.physics.add.staticGroup();
+    const ground = this.add.rectangle(this.worldW/2, this.groundY, this.worldW, 60, 0x000000); 
+    ground.setAlpha(0);
+    this.physics.add.existing(ground, true); this.platforms.add(ground);
+
+    const positions = [
+      {x: 200, y: this.groundY - 200, t: 'plat_blue'}, {x: 600, y: this.groundY - 400, t: 'plat_red'},
+      {x: 1000, y: this.groundY - 300, t: 'plat_green'}, {x: 1400, y: this.groundY - 500, t: 'plat_yellow'},
+      {x: 1000, y: this.groundY - 700, t: 'plat_blue'}, {x: 500, y: this.groundY - 900, t: 'plat_red'},
+      {x: 200, y: this.groundY - 1100, t: 'plat_green'}, {x: 700, y: this.groundY - 1300, t: 'plat_yellow'},
+      {x: 1200, y: this.groundY - 1500, t: 'plat_blue'}, {x: 1400, y: this.groundY - 1700, t: 'plat_red'}
+    ];
+    positions.forEach(p => this.platforms.create(p.x, p.y, p.t).refreshBody());
+
+    this.trashCan = this.physics.add.staticSprite(1400, this.groundY - 1800, 'trashcan');
+    this.bottles = this.physics.add.group();
+    positions.forEach(p => this.spawnBottle(p.x, p.y - 70));
   }
 
+  // --- LEVEL 5 (BOSS FIGHT) - FIXED SIZE ---
+  createLevel5() {
+    this.totalBottles = 5; 
+    // Increased size to prevent black bars on phone
+    this.worldW = 1600; this.worldH = 2200; this.groundY = this.worldH - 100;
+    this.physics.world.setBounds(0, 0, this.worldW, this.worldH);
+    
+    // Background now fills the larger world
+    this.add.image(0, 0, 'bg_boss').setOrigin(0, 0).setDisplaySize(this.worldW, this.worldH);
+
+    this.platforms = this.physics.add.staticGroup();
+    const ground = this.add.rectangle(this.worldW/2, this.groundY, this.worldW, 60, 0x000000); 
+    ground.setAlpha(0); 
+    this.physics.add.existing(ground, true);
+    this.platforms.add(ground);
+
+    // Centered platforms in new larger world
+    this.platforms.create(this.worldW/2 - 400, this.groundY - 200, 'plat_blue');
+    this.platforms.create(this.worldW/2 + 400, this.groundY - 200, 'plat_blue');
+    this.platforms.create(this.worldW/2, this.groundY - 350, 'plat_green');
+
+    this.boss = this.physics.add.sprite(this.worldW - 300, this.groundY - 200, 'boss_texture');
+    this.boss.setCollideWorldBounds(true);
+    this.boss.setBounce(1);
+    this.boss.setVelocityX(-this.bossSpeed);
+    this.boss.body.setSize(100, 100);
+
+    this.bottles = this.physics.add.group();
+    this.trashCan = { x: -999, y: -999 };
+  }
+
+  // --- GAME LOOP UPDATE ---
   update(time, delta) {
     if (this.isGameOver) return;
 
-    if (this.levelNumber === 2 && this.toxicWater) {
-       this.toxicWater.tilePositionY -= 0.5;
+    // L2: Rain Logic
+    if (this.levelNumber === 2) {
+        if (Math.random() < 0.03) {
+            const x = Phaser.Math.Between(0, this.worldW);
+            const drop = this.raindrops.create(x, this.cameras.main.scrollY - 50, 'rain_drop');
+            drop.setVelocityY(500); 
+        }
+        this.raindrops.children.iterate((drop) => {
+            if (drop && drop.y > this.groundY + 100) drop.destroy();
+        });
     }
 
-    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.trashCan.x, this.trashCan.y);
-    if (dist < 100 && this.collected > 0) {
-        this.depositBottles();
+    // L3: Water Logic
+    if (this.levelNumber === 3 && this.toxicWater) this.toxicWater.tilePositionY -= 0.5;
+
+    // L4: Flashlight Logic (Move light with player)
+    if (this.levelNumber === 4 && this.lightSource) {
+        this.lightSource.setPosition(this.player.x, this.player.y);
     }
 
-    const t = this.time.now * 0.002;
-    this.bottles.children.iterate(bottle => {
-        if (!bottle) return;
-        bottle.y = Phaser.Math.Linear(bottle.y, bottle.baseY + Math.sin(t * bottle.floatSpeed + bottle.floatOffset) * 12, 0.08);
-    });
+    // L5: Boss Logic
+    if (this.levelNumber === 5 && this.boss) {
+        if (this.boss.body.blocked.left) {
+            this.boss.setVelocityX(this.bossSpeed); this.boss.setFlipX(true);
+        } else if (this.boss.body.blocked.right) {
+            this.boss.setVelocityX(-this.bossSpeed); this.boss.setFlipX(false);
+        }
+    }
+
+    // General: Deposit Logic (Except L5)
+    if (this.levelNumber !== 5) {
+        const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.trashCan.x, this.trashCan.y);
+        if (dist < 100 && this.collected > 0) this.depositBottles();
+    }
 
     // MOVEMENT
-    const speed = 460; 
-    const jumpForce = -980; 
-    
+    const speed = 460; const jumpForce = -980; 
     const left = this.cursors.left.isDown || this.inputs.left;
     const right = this.cursors.right.isDown || this.inputs.right;
     const jump = this.cursors.up.isDown || this.inputs.jump;
 
     if (left) {
-        this.player.setVelocityX(-speed);
-        this.player.setFlipX(true);
-        this.animateWalk(delta);
+        this.player.setVelocityX(-speed); this.player.setFlipX(true); this.animateWalk(delta);
     } else if (right) {
-        this.player.setVelocityX(speed);
-        this.player.setFlipX(false);
-        this.animateWalk(delta);
+        this.player.setVelocityX(speed); this.player.setFlipX(false); this.animateWalk(delta);
     } else {
-        this.player.setVelocityX(0);
-        this.player.setTexture('player_idle');
-        this.walkTimer = 0;
+        this.player.setVelocityX(0); this.player.setTexture('player_idle'); this.walkTimer = 0;
     }
 
     if (jump && this.player.body.touching.down) {
         this.player.setVelocityY(jumpForce);
+    }
+  }
+
+  // --- ACTIONS ---
+  hitBoss(player, boss) {
+      if (this.isGameOver || this.bossInvulnerable) return;
+      if (player.body.y < boss.body.y - 40 && player.body.velocity.y > 0) {
+          player.setVelocityY(-600);
+          this.damageBoss();
+      } else {
+          this.hitDanger();
+      }
+  }
+
+  damageBoss() {
+      this.bossInvulnerable = true;
+      this.bossHealth--;
+      this.boss.setTint(0xff0000);
+      
+      const bottle = this.bottles.create(this.boss.x, this.boss.y - 50, 'bottle');
+      bottle.body.allowGravity = false;
+      bottle.setImmovable(true); 
+      bottle.setVelocity(0,0);
+      
+      this.tweens.add({
+          targets: bottle, y: bottle.y - 30, duration: 1000, yoyo: true, repeat: -1
+      });
+
+      this.time.delayedCall(500, () => {
+          this.boss.clearTint();
+          this.bossInvulnerable = false;
+          this.bossSpeed += 50;
+          this.boss.setVelocityX(this.boss.body.velocity.x > 0 ? this.bossSpeed : -this.bossSpeed);
+      });
+  }
+
+  hitDanger() {
+    if (this.isGameOver) return;
+    this.isGameOver = true;
+    this.physics.pause();
+    this.player.setTint(0xff0000); 
+    this.showEndPopup(false);
+  }
+
+  collectBottle(player, bottle) {
+    bottle.destroy();
+    this.collected++;
+    if (this.levelNumber === 5) {
+        this.deposited++;
+        this.collected = 0;
+        this.updateUI();
+        if (this.deposited >= this.totalBottles) {
+            this.boss.destroy();
+            this.showEndPopup(true);
+        }
+    } else {
+        this.updateUI();
+    }
+  }
+
+  depositBottles() {
+    this.deposited += this.collected;
+    this.collected = 0;
+    this.updateUI();
+    this.trashCan.setTint(0x00ff00);
+    this.time.delayedCall(200, () => this.trashCan.clearTint());
+    if (this.deposited >= this.totalBottles) {
+        this.time.delayedCall(500, () => { this.showEndPopup(true); });
     }
   }
 
@@ -352,36 +555,12 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  collectBottle(player, bottle) {
-    bottle.destroy();
-    this.collected++;
-    this.updateUI();
-  }
-
-  hitWater() {
-    if (this.isGameOver) return;
-    this.isGameOver = true;
-    this.physics.pause();
-    this.player.setTint(0x00ff00);
-    this.showEndPopup(false);
-  }
-
-  depositBottles() {
-    this.deposited += this.collected;
-    this.collected = 0;
-    this.updateUI();
-    this.trashCan.setTint(0x00ff00);
-    this.time.delayedCall(200, () => this.trashCan.clearTint());
-
-    if (this.deposited >= this.totalBottles) {
-        this.time.delayedCall(500, () => {
-             this.showEndPopup(true);
-        });
-    }
-  }
-
   updateUI() {
-    document.getElementById('score-display').innerText = `ჩანთაში: ${this.collected} | შეგროვებული: ${this.deposited}`;
+    const prefix = (this.levelNumber === 5) ? "დარტყმები" : "ჩანთაში";
+    const suffix = (this.levelNumber === 5) ? this.deposited : this.collected;
+    const total = (this.levelNumber === 5) ? this.deposited : this.deposited;
+    const label = (this.levelNumber === 5) ? `BOSS HP: ${5 - this.deposited}` : `${prefix}: ${suffix} | სულ: ${total}/${this.totalBottles}`;
+    document.getElementById('score-display').innerText = label;
   }
 
   setupTouchControls() {
@@ -395,6 +574,21 @@ class GameScene extends Phaser.Scene {
     bind('btn-left', 'left'); bind('btn-right', 'right'); bind('btn-jump', 'jump');
   }
 
+  // --- ASSETS GENERATION ---
+  createRainTexture() {
+      const g = this.make.graphics({add:false});
+      g.fillStyle(0x00ff00, 1); 
+      g.fillRoundedRect(0,0,8,25,4);
+      g.generateTexture('rain_drop', 8, 25); g.destroy();
+  }
+  createLightTexture() {
+      // Creates a fuzzy circle for the flashlight
+      const g = this.make.graphics({add:false});
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(150, 150, 150); // Large 300px light
+      g.generateTexture('light_texture', 300, 300);
+      g.destroy();
+  }
   createPlayerPoses() {
     const draw = (key, legSwing = 0, armSwing = 0) => {
       const g = this.make.graphics({ add: false });
@@ -412,7 +606,6 @@ class GameScene extends Phaser.Scene {
     };
     draw('player_idle', 0, 0); draw('player_walk1', 6, -4); draw('player_walk2', -6, 4);
   }
-
   createPlatformTextures() {
     const colors = { plat_red: 0xe53935, plat_blue: 0x1e88e5, plat_yellow: 0xfdd835, plat_green: 0x43a047 };
     for (const [key, val] of Object.entries(colors)) {
@@ -422,7 +615,6 @@ class GameScene extends Phaser.Scene {
         g.generateTexture(key, 140, 30); g.destroy();
     }
   }
-
   createItemTextures() {
     let g = this.make.graphics({add:false});
     g.fillStyle(0x81d4fa, 0.8); g.fillRoundedRect(10,10,20,30,5);
@@ -433,12 +625,42 @@ class GameScene extends Phaser.Scene {
     g.fillStyle(0x66bb6a); g.fillTriangle(35,40,20,65,50,65);
     g.generateTexture('trashcan', 70, 95); g.destroy();
   }
-  
   createWaterTexture() {
       const g = this.make.graphics({add:false});
       g.fillStyle(0x69f0ae, 0.8); g.fillRect(0, 0, 64, 64);
       g.fillStyle(0x00e676, 0.9); g.fillRect(0, 0, 64, 10);
       g.generateTexture('water', 64, 64); g.destroy();
+  }
+  createBossTexture() {
+      const g = this.make.graphics({add:false});
+      g.fillStyle(0x5d4037); g.fillCircle(50, 60, 40);
+      g.fillStyle(0x3e2723); g.fillCircle(70, 40, 30);
+      g.fillStyle(0x4e342e); g.fillCircle(30, 40, 30);
+      g.fillStyle(0xffffff); g.fillCircle(35, 45, 10); g.fillCircle(65, 45, 10);
+      g.fillStyle(0xff0000); g.fillCircle(35, 45, 4); g.fillCircle(65, 45, 4);
+      g.lineStyle(4, 0x000000); 
+      g.beginPath(); g.moveTo(20, 30); g.lineTo(45, 40); g.strokePath();
+      g.beginPath(); g.moveTo(80, 30); g.lineTo(55, 40); g.strokePath();
+      g.generateTexture('boss_texture', 100, 100); g.destroy();
+  }
+  
+  createToxicPlatforms() {
+    this.platforms = this.physics.add.staticGroup();
+    const ground = this.add.rectangle(this.worldW/2, this.groundY, this.worldW, 60, 0x000000); ground.setAlpha(0);
+    this.physics.add.existing(ground, true); this.platforms.add(ground);
+    this.platformPositions = [
+        {x: 250, y: this.groundY - 200, t: 'plat_red'}, {x: 650, y: this.groundY - 400, t: 'plat_blue'},
+        {x: 1100, y: this.groundY - 600, t: 'plat_yellow'}, {x: 700, y: this.groundY - 850, t: 'plat_green'},
+        {x: 250, y: this.groundY - 1100, t: 'plat_red'}, {x: 650, y: this.groundY - 1350, t: 'plat_blue'},
+        {x: 1200, y: this.groundY - 1600, t: 'plat_yellow'}, {x: 725, y: this.groundY - 1890, t: 'plat_green'}
+    ];
+  }
+  
+  spawnBottle(x, y) {
+      if(!this.bottles) return; 
+      const bottle = this.bottles.create(x, y, 'bottle');
+      bottle.body.allowGravity = false; bottle.setImmovable(true);
+      bottle.baseY = y; bottle.floatSpeed = 1 + Math.random() * 0.5; bottle.floatOffset = Math.random() * Math.PI * 2;
   }
 }
 
